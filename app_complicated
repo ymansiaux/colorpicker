@@ -1,0 +1,140 @@
+# Working with weird input names
+library(shiny)
+library(colourpicker)
+library(ggplot2)
+devtools::load_all()
+
+create_valid_shiny_input_names <- function(x) {
+  # En fait on veut des inputId avec les noms des produits, mais il y a parfois
+  # des espaces, des () etc ... donc on vire tout ca, on va reconstruire les bons noms
+  # dans la fonction d'après
+
+  # peut etre d'autres cas de figure ...
+
+  x %>%
+    gsub(
+      x = .,
+      pattern = " ",
+      replacement = "_espacevide_"
+    ) %>%
+    gsub(
+      x = .,
+      pattern = "\\(",
+      replacement = "_parentheseouverte_"
+    ) %>%
+    gsub(
+      x = .,
+      pattern = "\\)",
+      replacement = "_parenthesefermee_"
+    )
+}
+
+revert_shiny_input_names <- function(x) {
+  x %>%
+    gsub(x = .,
+         pattern = "_espacevide_",
+         replacement = " ") %>%
+    gsub(x = .,
+         pattern = "_parentheseouverte_",
+         replacement = "(") %>%
+    gsub(x = .,
+         pattern = "_parenthesefermee_",
+         replacement = ")")
+
+}
+
+
+
+
+# Define UI for application that draws a histogram
+ui <- fluidPage(fluidRow(
+  column(
+    width = 4,
+    actionButton("pause", "Pause"),
+
+    uiOutput(outputId = "select_colors")
+  ),
+
+  column(width = 8,
+         plotOutput("distPlot", height = "800px"))
+))
+
+# Define server logic required to draw a histogram
+server <- function(input, output) {
+  observeEvent(input$pause, browser())
+
+  data_reprex <- readRDS("some top secret data.rds")
+  data_graph_reprex <- data_reprex$dfGraph
+  data_sub_attr_catalog_reprex <- data_reprex$subAttributesCatalogDf
+
+
+  observe(print(reactiveValuesToList(input)))
+
+  data <- reactive(data_graph_reprex)
+
+  # on récupère les valeurs uniques de produits
+  # ici c'est stocké dans les rownames
+  distinct_values_for_which_colors_are_required <- reactive(
+    as.character(
+      unique(
+        rownames(
+          data()
+        )
+      )
+    )
+  )
+
+  # on recupere les futurs inputId, sans caracteres speciaux
+  cleaned_values_to_create_inputs <- reactive(
+    create_valid_shiny_input_names(distinct_values_for_which_colors_are_required())
+  )
+
+
+  output$distPlot <- renderPlot({
+    input_list <- reactiveValuesToList(input)
+
+    distinct_product_values <- cleaned_values_to_create_inputs()
+    req(all(
+      distinct_product_values %in% names(input_list)
+    ))
+
+    # ici on construit le df en fonction des valeurs des colorpickers
+    color_vec <-
+      data.frame("product" = names(input_list[distinct_product_values]),
+                 "color" = unlist(input_list[distinct_product_values]))
+
+    # on rettoie a posteriori le nom des produits
+    # on remet les caracteres speciaux
+    color_vec$product <- color_vec$product %>%
+      revert_shiny_input_names()
+
+    makeLinePlotYM(
+      dfGraph = data_graph_reprex,
+      subAttributesCatalogDf = data_sub_attr_catalog_reprex,
+      mapping = FALSE,
+      dfMean = NULL,
+      productColors = color_vec
+    )$horizontal
+  })
+
+  output$select_colors <- renderUI({
+    nvalues <-
+      length(distinct_values_for_which_colors_are_required())
+
+    lapply(1:nvalues, function(i) {
+      colourInput(
+        cleaned_values_to_create_inputs()[i],
+        paste(
+          "Colour for:",
+          distinct_values_for_which_colors_are_required()[i]
+        ) ,
+        colors()[i * sample(2:20, size = 1)] # choix aleatoire de couleurs
+      )
+
+    })
+  })
+
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)
